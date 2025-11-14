@@ -78,22 +78,92 @@ class ReservationServiceTest {
     
     @Test
     void testCreateReservation_Success() {
-        // TODO: Implementar el test de creación de reserva exitosa
+        ReservationRequestDTO requestDTO = new ReservationRequestDTO();
+        requestDTO.setUserId(1L);
+        requestDTO.setBookExternalId(258027L);
+        requestDTO.setRentalDays(7);
+        requestDTO.setStartDate(LocalDate.now());
+
+        when(userService.getUserEntity(1L)).thenReturn(testUser);
+        when(bookRepository.findByExternalId(258027L)).thenReturn(Optional.of(testBook));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(invocation -> {
+            Reservation saved = invocation.getArgument(0);
+            saved.setId(99L);
+            return saved;
+        });
+
+        ReservationResponseDTO result = reservationService.createReservation(requestDTO);
+
+        assertNotNull(result);
+        assertEquals(99L, result.getId());
+        assertEquals(testUser.getId(), result.getUserId());
+        assertEquals(testBook.getExternalId(), result.getBookExternalId());
+
+        verify(bookService, times(1)).decreaseAvailableQuantity(258027L);
+        verify(reservationRepository, times(1)).save(any(Reservation.class));
     }
     
     @Test
     void testCreateReservation_BookNotAvailable() {
-        // TODO: Implementar el test de creación de reserva cuando el libro no está disponible
+        testBook.setAvailableQuantity(0);
+
+        ReservationRequestDTO requestDTO = new ReservationRequestDTO();
+        requestDTO.setUserId(1L);
+        requestDTO.setBookExternalId(258027L);
+        requestDTO.setRentalDays(7);
+        requestDTO.setStartDate(LocalDate.now());
+
+        when(userService.getUserEntity(1L)).thenReturn(testUser);
+        when(bookRepository.findByExternalId(258027L)).thenReturn(Optional.of(testBook));
+
+        RuntimeException ex = assertThrows(RuntimeException.class, () ->
+                reservationService.createReservation(requestDTO)
+        );
+
+        assertEquals("No hay unidades disponibles para reservar", ex.getMessage());
+        verify(reservationRepository, never()).save(any());
     }
     
     @Test
     void testReturnBook_OnTime() {
-        // TODO: Implementar el test de devolución de libro en tiempo
+        LocalDate returnDate = testReservation.getExpectedReturnDate();
+
+        ReturnBookRequestDTO request = new ReturnBookRequestDTO();
+        request.setReturnDate(returnDate);
+
+        when(reservationRepository.findById(1L)).thenReturn(Optional.of(testReservation));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReservationResponseDTO result = reservationService.returnBook(1L, request);
+
+        assertNotNull(result);
+        assertEquals(Reservation.ReservationStatus.RETURNED, result.getStatus());
+        assertEquals(BigDecimal.ZERO, result.getLateFee());
+
+        verify(bookService, times(1)).increaseAvailableQuantity(testBook.getExternalId());
     }
     
     @Test
     void testReturnBook_Overdue() {
-        // TODO: Implementar el test de devolución de libro con retraso
+        LocalDate returnDate = testReservation.getExpectedReturnDate().plusDays(3);
+
+        ReturnBookRequestDTO request = new ReturnBookRequestDTO();
+        request.setReturnDate(returnDate);
+
+        when(reservationRepository.findById(1L)).thenReturn(Optional.of(testReservation));
+        when(reservationRepository.save(any(Reservation.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReservationResponseDTO result = reservationService.returnBook(1L, request);
+
+        assertNotNull(result);
+        assertEquals(Reservation.ReservationStatus.RETURNED, result.getStatus());
+
+        BigDecimal expectedLateFee =
+                testBook.getPrice().multiply(new BigDecimal("0.15")).multiply(new BigDecimal("3"));
+
+        assertEquals(expectedLateFee.setScale(2), result.getLateFee());
+
+        verify(bookService, times(1)).increaseAvailableQuantity(testBook.getExternalId());
     }
     
     @Test
